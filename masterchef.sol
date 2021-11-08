@@ -493,6 +493,8 @@ contract ERC20 is Context, IERC20,Ownable {
     mapping (address => mapping (address => uint256)) private _allowances;
 
     uint256 private _totalSupply;
+    uint256 private MAXCAP;
+    uint256 constant MAXCAPSUPPLY=6400*10**18;
 
     string private _name;
     string private _symbol;
@@ -550,6 +552,15 @@ contract ERC20 is Context, IERC20,Ownable {
      */
     function totalSupply() public view override returns (uint256) {
         return _totalSupply;
+    }
+    
+
+    function minted() public override view returns (uint256) {
+        return MAXCAP;
+    }
+
+    function maxSupply() public pure returns (uint256) {
+        return MAXCAPSUPPLY;
     }
 
     /**
@@ -1279,11 +1290,13 @@ contract MasterChef is Ownable, ReentrancyGuard {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][_user];
         uint256 accLimePerShare = pool.accLimePerShare;
-        uint256 lpSupply = pool.lpToken.balanceOf(address(this));
-        if (block.number > pool.lastRewardBlock && lpSupply != 0 && totalAllocPoint>0) {
+        if (block.number > pool.lastRewardBlock && pool.lpSupply != 0 && totalAllocPoint>0) {
             uint256 multiplier = getMultiplier(pool.lastRewardBlock, block.number);
             uint256 LimeReward = multiplier.mul(LimePerBlock).mul(pool.allocPoint).div(totalAllocPoint);
-            accLimePerShare = accLimePerShare.add(LimeReward.mul(1e18).div(lpSupply));
+            if (Lime.minted().add(LimeReward) > Lime.maxSupply()) {
+                LimeReward = Lime.maxSupply().sub(Lime.minted());
+            }
+            accLimePerShare = accLimePerShare.add(LimeReward.mul(1e18).div(pool.lpSupply));
         }
         return user.amount.mul(accLimePerShare).div(1e18).sub(user.rewardDebt);
     }
@@ -1302,16 +1315,35 @@ contract MasterChef is Ownable, ReentrancyGuard {
         if (block.number <= pool.lastRewardBlock) {
             return;
         }
-        uint256 lpSupply = pool.lpToken.balanceOf(address(this));
-        if (lpSupply == 0 || pool.allocPoint == 0) {
+        if (pool.lpSupply == 0 || pool.allocPoint == 0) {
             pool.lastRewardBlock = block.number;
             return;
         }
         uint256 multiplier = getMultiplier(pool.lastRewardBlock, block.number);
         uint256 LimeReward = multiplier.mul(LimePerBlock).mul(pool.allocPoint).div(totalAllocPoint);
-        Lime.mint(devAddress, LimeReward.div(10));
-        Lime.mint(address(this), LimeReward);
-        pool.accLimePerShare = pool.accLimePerShare.add(LimeReward.mul(1e18).div(lpSupply));
+        uint256 devReward = LimeReward.div(10);
+        
+        uint256 currentSupply = Lime.minted();
+        uint256 maxSupply = Lime.maxSupply();
+
+        uint256 totalRewards = currentSupply.add(devReward).add(LimeReward);
+        
+        if (totalRewards  <= maxSupply) {
+            // mint devReward normal as not at maxSupply 
+            Lime.mint(devaddr, devReward);   
+
+        } else {
+
+            // mint the difference only to MC, update LimeReward
+            LimeReward= maxSupply.sub(currentSupply);
+        }
+        
+        if (LimeReward != 0) {
+            // only mint, calculate and update if LimeReward is non 0
+            Lime.mint(address(this), LimeReward);
+            pool.accLimePerShare = pool.accLimePerShare.add(LimeReward.mul(1e18).div(pool.lpSupply));
+        } 
+
         pool.lastRewardBlock = block.number;
     }
 
@@ -1332,7 +1364,7 @@ contract MasterChef is Ownable, ReentrancyGuard {
         }
         if (_amount > 0) {
             uint256 balancebefore=pool.lpToken.balanceOf(address(this));
-            pool.lpToken.safeTransferFrom(address(msg.sender), address(this), _amount);
+            pool.lpToken.safeTransferFrom(msg.sender, address(this), _amount);
             uint256 final_amount=pool.lpToken.balanceOf(address(this)).sub(balancebefore);
             if (pool.depositFeeBP > 0) {
                 uint256 depositFee = final_amount.mul(pool.depositFeeBP).div(10000);
@@ -1362,7 +1394,7 @@ contract MasterChef is Ownable, ReentrancyGuard {
         }
         if (_amount > 0) {
             user.amount = user.amount.sub(_amount);
-            pool.lpToken.safeTransfer(address(msg.sender), _amount);
+            pool.lpToken.safeTransfer(msg.sender, _amount);
             pool.lpSupply=pool.lpSupply.sub(_amount);
         }
         user.rewardDebt = user.amount.mul(pool.accLimePerShare).div(1e18);
@@ -1376,7 +1408,15 @@ contract MasterChef is Ownable, ReentrancyGuard {
         uint256 amount = user.amount;
         user.amount = 0;
         user.rewardDebt = 0;
-        pool.lpToken.safeTransfer(address(msg.sender), amount);
+        
+        if (pool.lpSupply >= amount) {
+            pool.lpSupply = pool.lpSupply.sub(amount);
+        } else {
+            pool.lpSupply = 0; 
+        }
+
+        pool.lpToken.safeTransfer(msg.sender, amount);
+
         emit EmergencyWithdraw(msg.sender, _pid, amount);
     }
 
@@ -1427,7 +1467,21 @@ contract MasterChef is Ownable, ReentrancyGuard {
             uint256 commissionAmount = _pending.mul(referralCommissionRate).div(10000);
 
             if (referrer != address(0) && commissionAmount > 0) {
+                uint256 maxSupply = Lime.maxSupply();
+                uint256 currentSupply = Lime.minted();
+                if (currentSupply >= maxSupply) {
+                    // don't mint
+                    return;
+                }
+
+                uint256 totalRewards = currentSupply.add(commissionAmount);
+                if (totalRewards > maxSupply) {
+                    // update commissionAmount to be difference
+                    commissionAmount = maxSupply.sub(currentSupply);
+                }
+
                 Lime.mint(referrer, commissionAmount);
+                
                 emit ReferralCommissionPaid(_user, referrer, commissionAmount);
             }
         }

@@ -451,7 +451,7 @@ contract BEP20 is Context, IBEP20, Ownable {
         return MAXCAPSUPPLY;
     }
 
-    function minted() public override view returns (uint256) {
+    function minted() public view returns (uint256) {
         return MAXCAP;
     }
 

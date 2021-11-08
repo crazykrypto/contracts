@@ -555,7 +555,7 @@ contract ERC20 is Context, IERC20,Ownable {
     }
     
 
-    function minted() public override view returns (uint256) {
+    function minted() public view returns (uint256) {
         return MAXCAP;
     }
 

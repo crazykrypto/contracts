@@ -1185,7 +1185,7 @@ contract MasterChef is Ownable, ReentrancyGuard {
     }
 
     // The Lime TOKEN!
-    LIME public Lime;
+    LIME public immutable Lime;
     address public devAddress;
     address public feeAddress;
     // address public vaultAddress;
@@ -1205,7 +1205,7 @@ contract MasterChef is Ownable, ReentrancyGuard {
     uint256 public startBlock;
 
     // Lime referral contract address.
-    IReferral public referral;
+    IReferral public immutable referral;
     // Referral commission rate in basis points.
     uint16 public referralCommissionRate = 200;
     // Max referral commission rate: 5%.
